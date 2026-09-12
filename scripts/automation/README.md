@@ -43,6 +43,12 @@ export CODEX_BIN="/absolute/path/to/codex"
 The installer saves the resolved Codex path in the LaunchAgent, so scheduled runs
 do not depend on the desktop app's PATH. Reinstall the scheduler if that path moves.
 
+The worker explicitly selects `gpt-5.5` (verified with this ChatGPT account), avoiding
+an obsolete `gpt-5.3-codex` model in the global CLI configuration. It does not edit
+that configuration. To select another model supported by your account, export
+`CODEX_MODEL` before manual execution or scheduler installation. The installer saves
+that selection in the plist; reinstall to change an installed override.
+
 The current validation contract is `npm test`, `npm run lint`, `npm run build`.
 All three must succeed. Existing application failures block an issue as well;
 fix those deliberately, never bypass the gate. The issue agent must additionally
@@ -129,14 +135,22 @@ next real run.
   crash does not immediately allow another worker beside a still-running child.
 - `current-issue`: atomically written/fsynced JSON journal including issue, PID,
   branch, start time and phase; written **before** the GitHub claim.
-- `last-run`: last result, timestamps and the last issue branch where applicable.
+- `last-run`: last result, timestamps, failure diagnostic and the last issue branch
+  where applicable. Idle polls preserve this result instead of erasing failures.
+- `last-check`: timestamp of the latest idle poll.
 - `logs/worker.log`: timestamps, sanitized title, issue, branch, Codex/check start
   and exit status, errors and GitHub transitions. Rotates at 1 MiB, four backups.
 - `logs/launchd.stdout.log` and `launchd.stderr.log`: scheduler diagnostics,
   truncated in place on worker startup after exceeding 1 MiB. If Python or the
   worker entrypoint itself is broken, disable the scheduler while repairing it.
 
-Raw Codex/test output is intentionally discarded rather than written to logs.
+Raw stdout is intentionally discarded. Stderr is continuously drained into a
+bounded 64 KiB memory buffer. On nonzero exit only, up to 8,000 characters of
+filtered diagnostic text are included in the rotating worker log and failure state.
+The filter removes recognized tokens, sensitive environment values, authorization
+headers, credential assignments, URLs and home/private paths before writing.
+This is best-effort filtering, not a guarantee for arbitrary secret formats; never
+print credentials in commands or tests. GitHub comments still use fixed text only.
 Common credential and private-path patterns are redacted from issue titles; keep
 secrets out of GitHub issues entirely. To diagnose a failing validation command,
 stop scheduling and run the named command interactively. Codex's own session

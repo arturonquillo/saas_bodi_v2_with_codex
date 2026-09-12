@@ -16,10 +16,13 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
+from collections import deque
 
 STATES = ('ready', 'in-progress', 'review', 'blocked')
 VALIDATION = (('npm', 'test'), ('npm', 'run', 'lint'), ('npm', 'run', 'build'))
 TIMEOUT = 3600
+DEFAULT_MODEL = 'gpt-5.5'
 RESULT_SCHEMA = {
     'type': 'object', 'additionalProperties': False,
     'properties': {'completed': {'type': 'boolean'},
@@ -44,6 +47,10 @@ def codex_candidates():
             Path.home() / 'Applications/ChatGPT.app/Contents/Resources/codex')
 
 
+def codex_model():
+    return os.environ.get('CODEX_MODEL', '').strip() or DEFAULT_MODEL
+
+
 def resolve_codex():
     """Desktop-app PATH is not inherited by ordinary terminals or launchd."""
     override = os.environ.get('CODEX_BIN')
@@ -61,15 +68,46 @@ def resolve_codex():
     raise WorkerError('Missing dependency: codex. Install Codex CLI or set CODEX_BIN to its absolute executable path')
 
 
+def diagnostic(data):
+    """Redact in memory before any stderr fragment reaches disk or the terminal."""
+    value = data.decode('utf-8', errors='replace')
+    value = re.sub(r'\x1b\[[0-?]*[ -/]*[@-~]', '', value)
+    for name, secret in os.environ.items():
+        if re.search(r'token|secret|password|api.?key|credential', name, re.I) and secret:
+            value = value.replace(secret, '[redacted]')
+    value = re.sub(r'-----BEGIN [^-]*PRIVATE KEY-----[\s\S]*', '[redacted private key]', value)
+    value = re.sub(r'(?:gh[pousr]_[A-Za-z0-9_]+|github_pat_\S+|sk-\S+|eyJ\S+)', '[redacted]', value)
+    value = re.sub(r'(?i)\b(?:bearer|basic)\s+\S+', '[redacted authorization]', value)
+    value = re.sub(r'''(?ix)(?<![\w.-])(["']?[\w.-]{0,64}(?:token|secret|password|api[_-]?key|credential)[\w.-]{0,64}["']?\s*[:=]\s*)
+                      (?:"[^"\n]*"|'[^'\n]*'|[^\s,;]+)''', r'\1[redacted]', value)
+    value = re.sub(r'https?://[^\s<>]+', '[redacted URL]', value)
+    value = value.replace(str(Path.home()), '[home]')
+    value = re.sub(r'(?:/Users/|/home/|/private/|/tmp/)[^\s\"\']+', '[local path]', value)
+    value = ''.join(char for char in value if char in '\n\t' or char.isprintable())
+    return value[-8000:].strip()
+
+
 def run(args, cwd=None, timeout=60, lock=None, quiet=False):
-    """Never use a shell; never print subprocess output (it may contain secrets)."""
+    """No shell. Retain bounded stderr in RAM; persist only redacted failures."""
     environment = dict(os.environ, GIT_OPTIONAL_LOCKS='0', GH_NO_UPDATE_NOTIFIER='1',
                        GH_NO_EXTENSION_UPDATE_NOTIFIER='1', GIT_TERMINAL_PROMPT='0',
                        GH_PROMPT_DISABLED='1')
     with subprocess.Popen(args, cwd=cwd, stdin=subprocess.DEVNULL,
                           stdout=subprocess.DEVNULL if quiet else subprocess.PIPE,
-                          stderr=subprocess.DEVNULL, start_new_session=True, env=environment,
+                          stderr=subprocess.PIPE, start_new_session=True, env=environment,
                           pass_fds=() if lock is None else (lock.fileno(),)) as child:
+        tail = deque(maxlen=16)  # At most 64 KiB, even for noisy commands.
+        error_stream = child.stderr
+        def drain_errors():
+            while True:
+                chunk = error_stream.read1(4096)
+                if not chunk:
+                    return
+                tail.append(chunk)
+        reader = threading.Thread(target=drain_errors, daemon=True)
+        reader.start()
+        # communicate must not race with our stderr reader.
+        child.stderr = None
         try:
             output, _ = child.communicate(timeout=timeout)
         except BaseException:
@@ -83,8 +121,14 @@ def run(args, cwd=None, timeout=60, lock=None, quiet=False):
             except ProcessLookupError:
                 pass
             raise
+        finally:
+            reader.join(timeout=1)
+            if not reader.is_alive():
+                error_stream.close()
         if child.returncode:
-            raise WorkerError(f'{Path(args[0]).name} {args[1]} failed (exit {child.returncode})')
+            detail = diagnostic(b''.join(tail))
+            message = f'{Path(args[0]).name} {args[1]} failed (exit {child.returncode})'
+            raise WorkerError(message + (f'\nSanitized stderr:\n{detail}' if detail else '\nNo stderr diagnostic received'))
         return (output or b'').decode('utf-8').strip()
 
 
@@ -291,7 +335,10 @@ affected files, tests and remaining concerns. Never include credentials in the r
                 raise WorkerError('Working tree is dirty; no issue claimed; preserve and review local changes')
             issue = self.select()
             if not issue:
-                write_json(self.state / 'last-run', {'result': 'idle', 'finished': now()})
+                check = {'result': 'idle', 'finished': now()}
+                write_json(self.state / 'last-check', check)
+                if not (self.state / 'last-run').exists():
+                    write_json(self.state / 'last-run', check)
                 return
             # Complete issue and comments are fetched before any claim, for sandboxed
             # execution without granting Codex additional network permissions.
@@ -335,7 +382,7 @@ affected files, tests and remaining concerns. Never include credentials in the r
                     schema = Path(result_dir) / 'schema.json'
                     result = Path(result_dir) / 'result.json'
                     write_json(schema, RESULT_SCHEMA)
-                    self.command('codex', 'exec', '--sandbox', 'workspace-write', '-c', 'approval_policy="never"',
+                    self.command('codex', 'exec', '--model', codex_model(), '--sandbox', 'workspace-write', '-c', 'approval_policy="never"',
                                  '--output-schema', str(schema), '--output-last-message', str(result),
                                  self.prompt(number), timeout=TIMEOUT, quiet=True)
                     if read_json(result).get('completed') is not True:
@@ -359,7 +406,7 @@ affected files, tests and remaining concerns. Never include credentials in the r
                 self.log.info('Completed issue #%s; review required; local branch retained', number)
             except BaseException as error:
                 self.log.error('Issue #%s failed: %s', number, safe_error(error))
-                record.update(result='failure', finished=now())
+                record.update(result='failure', finished=now(), reason=safe_error(error))
                 write_json(self.state / 'last-run', record)
                 # On network failure keep the journal for reconciliation next time.
                 try:
@@ -446,6 +493,7 @@ def scheduler(worker, action):
             'WorkingDirectory': str(worker.root), 'StartInterval': 60, 'RunAtLoad': True,
             'EnvironmentVariables': {'PATH': os.environ.get('PATH', '/usr/bin:/bin'),
                                      'CODEX_BIN': resolve_codex(),
+                                     'CODEX_MODEL': codex_model(),
                                      'HOME': str(Path.home())},
             'StandardOutPath': str(worker.state / 'logs/launchd.stdout.log'),
             'StandardErrorPath': str(worker.state / 'logs/launchd.stderr.log'),
@@ -488,6 +536,11 @@ def status(worker):
     print('Branch:', current.get('branch', last.get('branch', 'none')))
     print('Last run:', last.get('finished', 'none'))
     print('Last result:', last.get('result', 'none'))
+    if last.get('reason'):
+        print('Last error:', last['reason'])
+    check = read_json(worker.state / 'last-check')
+    if check:
+        print('Last idle check:', check.get('finished', 'none'))
     if current:
         try:
             worker.preflight()

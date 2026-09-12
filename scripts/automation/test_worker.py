@@ -8,6 +8,7 @@ import os
 import plistlib
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -211,6 +212,41 @@ class WorkerTests(unittest.TestCase):
     def test_stdin_closed(self):
         self.assertEqual(worker.run(['/bin/cat']), '')
 
+    def test_failed_command_preserves_diagnostic_and_redacts_secrets(self):
+        code = "import sys; sys.stderr.write('Error: invalid configuration; token=ghp_example123\\n'); sys.exit(2)"
+        with self.assertRaises(worker.WorkerError) as caught:
+            worker.run([sys.executable, '-c', code], quiet=True)
+        self.assertIn('invalid configuration', str(caught.exception))
+        self.assertIn('exit 2', str(caught.exception))
+        self.assertNotIn('ghp_example123', str(caught.exception))
+
+    def test_noisy_stderr_is_bounded_and_drained(self):
+        code = "import sys; sys.stderr.write('x' * 200000 + '\\nError: final diagnostic'); sys.exit(1)"
+        with self.assertRaises(worker.WorkerError) as caught:
+            worker.run([sys.executable, '-c', code], quiet=True, timeout=5)
+        self.assertIn('final diagnostic', str(caught.exception))
+        self.assertLess(len(str(caught.exception)), 8300)
+
+    def test_diagnostic_redacts_environment_credentials_paths_and_headers(self):
+        with patch.dict(os.environ, {'EXAMPLE_SECRET': 'unique-sensitive-value'}):
+            result = worker.diagnostic(b'Error unique-sensitive-value Authorization: Bearer abcdef\n'
+                                      b'api_key="two words" /Users/alice/private https://example.test/?token=abc')
+        for forbidden in ('unique-sensitive-value', 'abcdef', 'two words', '/Users/alice', 'token=abc'):
+            self.assertNotIn(forbidden, result)
+
+    def test_idle_poll_preserves_last_issue_failure(self):
+        self.worker.fail = 'codex'
+        with self.assertRaises(worker.WorkerError):
+            self.worker.work()
+        before = worker.read_json(self.worker.state / 'last-run')
+        self.worker.fail = None
+        self.worker.no_issue = True
+        self.worker.work()
+        self.assertEqual(worker.read_json(self.worker.state / 'last-run'), before)
+        self.assertEqual(before['number'], 123)
+        self.assertIn('codex exec failed', before['reason'])
+        self.assertEqual(worker.read_json(self.worker.state / 'last-check')['result'], 'idle')
+
     def test_child_inherits_lock_after_parent_descriptor_closed(self):
         self.assertTrue(self.worker.acquire())
         with subprocess.Popen(['/bin/sleep', '0.2'], pass_fds=(self.worker.lock.fileno(),)) as child:
@@ -273,6 +309,15 @@ class WorkerTests(unittest.TestCase):
         with patch.dict(os.environ, {'CODEX_BIN': ''}), \
                 patch('worker.shutil.which', return_value='/custom/bin/codex'):
             self.assertEqual(worker.resolve_codex(), '/custom/bin/codex')
+
+    def test_model_default_and_explicit_override(self):
+        with patch.dict(os.environ, {'CODEX_MODEL': ''}):
+            self.assertEqual(worker.codex_model(), 'gpt-5.5')
+        with patch.dict(os.environ, {'CODEX_MODEL': 'chosen-model'}):
+            self.assertEqual(worker.codex_model(), 'chosen-model')
+            self.worker.work()
+        call = next(call for call in self.worker.calls if call[:2] == ('codex', 'exec'))
+        self.assertEqual(call[call.index('--model') + 1], 'chosen-model')
 
     def test_codex_invalid_override_fails_without_fallback(self):
         with patch.dict(os.environ, {'CODEX_BIN': str(self.root / 'missing')}):
