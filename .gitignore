@@ -12,3 +12,6 @@ uploads
 .DS_Store
 coverage
 tsconfig.tsbuildinfo
+
+# Local issue worker state and rotating logs
+.codex-automation/
