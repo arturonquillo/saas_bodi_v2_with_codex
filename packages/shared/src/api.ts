@@ -1,0 +1,39 @@
+import type { ApiErrorCode } from "./errors";
+import type { DocumentType } from "./documents";
+import type { SaasRole, Surface } from "./roles";
+import type { SubscriptionStatus } from "./subscription";
+import type { ThemeTokens } from "./theme";
+
+export type ApiOk<T> = { data: T };
+export type ApiErr = { error: { code: ApiErrorCode; message: string; details?: unknown } };
+
+export type SessionDto = {
+  user_id: string;
+  tenant_id: string;
+  tenant_slug: string;
+  surface: Surface;
+  saas_role: SaasRole | null;
+  account_owner: boolean;
+  is_customer: boolean;
+  subscription_status: SubscriptionStatus;
+  document_type?: DocumentType;
+};
+
+export type CatalogItemDto = {
+  id: string;
+  sku: string;
+  nome: string;
+  preco_varejo_centavos: number;
+  preco_atacado_centavos: number;
+  qtd_min_atacado: number;
+  available: number;
+  sem_estoque: boolean;
+};
+
+export type ThemeDto = ThemeTokens;
+
+export type Page<T> = { items: T[]; next_cursor: string | null };
+
+export function availableQty(onHand: number, reserved: number): number {
+  return Math.max(0, onHand - reserved);
+}

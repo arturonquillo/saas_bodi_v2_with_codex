@@ -1,0 +1,349 @@
+openapi: 3.1.0
+info:
+  title: saas_frota API
+  version: 0.1.0
+  description: |
+    Canonical HTTP shapes. TypeScript unions in packages/shared win if this file lags.
+    Money is integer centavos. Authenticated tenant comes from the session cookie, not the body.
+servers:
+  - url: http://localhost:3000
+paths:
+  /api/health:
+    get:
+      summary: Liveness
+      responses:
+        "200":
+          description: OK
+  /api/loja/tema:
+    get:
+      summary: Tenant theme tokens (Store/SaaS pipeline)
+      parameters:
+        - $ref: "#/components/parameters/TenantSlug"
+      responses:
+        "200": { description: ThemeTokens }
+  /api/loja/config:
+    get:
+      summary: aceita_cpf / aceita_cnpj
+      parameters:
+        - $ref: "#/components/parameters/TenantSlug"
+      responses:
+        "200": { description: Store document flags }
+  /api/loja/catalogo:
+    get:
+      summary: Store projection of the single inventory ledger
+      parameters:
+        - $ref: "#/components/parameters/TenantSlug"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200": { description: Catalog page }
+  /api/loja/produtos/{id}:
+    get:
+      parameters:
+        - $ref: "#/components/parameters/TenantSlug"
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200": { description: Product }
+        "404": { description: Hidden or other tenant }
+  /api/loja/registrar:
+    post:
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password, nome, document_type, document_digits]
+              properties:
+                email: { type: string }
+                password: { type: string }
+                nome: { type: string }
+                document_type: { enum: [cpf, cnpj] }
+                document_digits: { type: string }
+                whatsapp: { type: string }
+      responses:
+        "201": { description: Created + session }
+        "422": { description: checksum or flags }
+  /api/loja/login:
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginBody"
+      responses:
+        "200": { description: Session cookie sf_sessao_loja }
+        "401": { description: Invalid }
+  /api/loja/logout:
+    post:
+      responses:
+        "204": { description: Cleared }
+  /api/loja/sessao:
+    get:
+      responses:
+        "200": { description: SessionDto }
+        "401": { description: Unauthenticated }
+  /api/loja/pedidos:
+    get:
+      responses:
+        "200": { description: Own orders }
+    post:
+      description: Checkout. Server freezes prices. Requires ativa.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [linhas]
+              properties:
+                linhas:
+                  type: array
+                  items:
+                    type: object
+                    required: [sku_id, qty]
+                    properties:
+                      sku_id: { type: string }
+                      qty: { type: integer, minimum: 1 }
+      responses:
+        "201": { description: Order novo }
+        "403": { description: entitlement_bloqueada }
+        "422": { description: moq / validacao }
+        "409": { description: estoque_insuficiente }
+  /api/loja/pedidos/{id}:
+    get:
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200": { description: Own order }
+        "404": { description: Not own / other tenant }
+  /api/identidade/cnpj:
+    post:
+      description: Rate-limited. Checksum first. Registry port may degrade.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [cnpj]
+              properties:
+                cnpj: { type: string }
+      responses:
+        "200": { description: ok or cnpj_registro_pendente }
+        "422": { description: checksum_invalido }
+        "429": { description: rate_limit }
+  /api/saas/login:
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginBody"
+      responses:
+        "200": { description: Cookie sf_sessao_saas }
+  /api/saas/logout:
+    post:
+      responses:
+        "204": { description: Cleared }
+  /api/saas/sessao:
+    get:
+      responses:
+        "200": { description: SessionDto }
+  /api/saas/pedidos:
+    get:
+      description: Role-filtered
+      responses:
+        "200": { description: Order list }
+    post:
+      description: supervisor/vendedor + ativa
+      responses:
+        "201": { description: Order novo }
+  /api/saas/pedidos/{id}:
+    get:
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200": { description: Order }
+        "404": { description: Hidden from role or other tenant }
+  /api/saas/pedidos/{id}/transicao:
+    post:
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [para]
+              properties:
+                para:
+                  $ref: "#/components/schemas/OrderStatus"
+      responses:
+        "200": { description: Transitioned }
+        "403": { description: forbidden or entitlement_bloqueada }
+        "409": { description: transicao_ilegal or estoque_insuficiente }
+  /api/saas/clientes:
+    get:
+      responses:
+        "200": { description: Customer picker }
+  /api/saas/estoque:
+    get:
+      responses:
+        "200": { description: Balances from the single ledger }
+  /api/saas/estoque/{id}:
+    get:
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200": { description: Sku + on_hand + reserved + available }
+  /api/saas/estoque/{id}/movimentos:
+    get:
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200": { description: Movement list }
+  /api/saas/estoque/{id}/ajuste:
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [on_hand, reason]
+              properties:
+                on_hand: { type: integer, minimum: 0 }
+                reason: { type: string }
+      responses:
+        "200": { description: Adjusted }
+  /api/saas/estoque/{id}/visibilidade:
+    patch:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [visivel_loja]
+              properties:
+                visivel_loja: { type: boolean }
+      responses:
+        "200": { description: Flag only — no on_hand change }
+  /api/saas/tema:
+    get:
+      responses:
+        "200": { description: ThemeTokens }
+    put:
+      responses:
+        "200": { description: Saved }
+  /api/saas/config:
+    get:
+      responses:
+        "200": { description: Tenant config }
+    put:
+      responses:
+        "200": { description: Saved }
+        "409": { description: both document flags false }
+  /api/saas/avisos:
+    get:
+      responses:
+        "200": { description: Outbox rows }
+  /api/saas/importacoes:
+    post:
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+                instruction: { type: string }
+      responses:
+        "201": { description: preview_id — ledger untouched }
+  /api/saas/importacoes/{id}:
+    get:
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200": { description: Preview rows }
+  /api/saas/importacoes/{id}/confirmar:
+    post:
+      description: Only apply path. Absolute quantidade.
+      responses:
+        "200": { description: applied / skipped }
+  /api/conta/login:
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginBody"
+      responses:
+        "200": { description: Cookie sf_sessao_conta }
+        "403": { description: not account_owner }
+  /api/conta/logout:
+    post:
+      responses:
+        "204": { description: Cleared }
+  /api/conta/sessao:
+    get:
+      responses:
+        "200": { description: SessionDto }
+  /api/conta/assinatura:
+    get:
+      responses:
+        "200": { description: plan + subscription_status }
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [subscription_status]
+              properties:
+                subscription_status:
+                  $ref: "#/components/schemas/SubscriptionStatus"
+      responses:
+        "200": { description: Updated }
+components:
+  parameters:
+    TenantSlug:
+      name: tenant
+      in: query
+      schema: { type: string, default: demo }
+    Id:
+      name: id
+      in: path
+      required: true
+      schema: { type: string }
+    Cursor:
+      name: cursor
+      in: query
+      schema: { type: string }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, default: 20, maximum: 100 }
+  schemas:
+    LoginBody:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string }
+        password: { type: string }
+        tenant: { type: string, default: demo }
+    OrderStatus:
+      type: string
+      enum: [novo, confirmado, separando, despachado, entregue, cancelado]
+    SubscriptionStatus:
+      type: string
+      enum: [ativa, inadimplente, cancelada]
+    ApiError:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string }
+            message: { type: string }
+            details: {}

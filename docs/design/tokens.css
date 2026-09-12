@@ -1,0 +1,131 @@
+/* saas_frota design tokens
+   Store + SaaS: apply [data-theme="tenant"] (seed demo values below).
+   Account: apply [data-theme="product"] only — never tenant variables.
+   Tenant-editable: --color-primary, --color-accent, --color-background, --marca, --logo-url.
+   System type/elevation/motion: --font-display, --font-body, --font-ui (Inter on
+   tenant; IBM Plex on product), --shadow-card, --shadow-card-hover, --duration,
+   --ease-standard. Not in the theme editor.
+   Visual language: docs/design/visual.md (Frappe Desk + Woo Storefront).
+*/
+
+:root {
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-pill: 999px;
+
+  --space-0: 0;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+
+  --hit-default: 36px;
+  --hit-mobile-field: 44px;
+  --hit-warehouse-courier: 48px;
+  --hit-warehouse-courier-primary: 52px;
+
+  --elevation-sm: 0 1px 2px rgba(0, 0, 0, 0.06);
+  --elevation-md: 0 2px 8px rgba(0, 0, 0, 0.08);
+
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-card-hover: 0 2px 8px rgba(0, 0, 0, 0.08);
+  --shadow-float: 0 8px 24px rgba(0, 0, 0, 0.12);
+
+  --duration-fast: 160ms;
+  --duration: 180ms;
+  --ease-standard: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  --tracking-kicker: 0.08em;
+
+  --font-display: Inter, ui-sans-serif, system-ui, sans-serif;
+  --font-body: Inter, ui-sans-serif, system-ui, sans-serif;
+  --font-ui: Inter, ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--font-ui);
+
+  --color-danger: #b42318;
+  --color-success: #1b7a4a;
+  --color-warning: #b45309;
+
+  --focus-ring-width: 2px;
+  --focus-ring-offset: 2px;
+}
+
+/* Seed tenant demo — Norte Atacado. Visibly not default blue/gray. */
+[data-theme="tenant"] {
+  --marca: "Norte Atacado";
+  --logo-url: none;
+
+  --color-marca: #0f4f3e;
+  --color-primary: #0f4f3e;
+  --color-accent: #c2410c;
+  --color-background: #f6efe3;
+  --color-text: #1c1917;
+  --color-text-muted: #57534e;
+  --color-text-on-primary: #f6efe3;
+  --color-text-on-accent: #fff7ed;
+  --color-surface: #fffbf5;
+  --color-surface-raised: #ffffff;
+  --color-border: #e7dccb;
+
+  --color-danger: #b42318;
+  --color-success: #1b7a4a;
+  --color-warning: #b45309;
+}
+
+/* Product chrome — Account only. Cool ink, IBM Plex. Not tenant shop/desk. */
+[data-theme="product"] {
+  --marca: "saas_frota";
+  --logo-url: none;
+
+  --font-display: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-body: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-ui: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--font-ui);
+
+  --color-marca: #1e3a5f;
+  --color-primary: #1e3a5f;
+  --color-accent: #3d6b8c;
+  --color-background: #f4f6f8;
+  --color-text: #142033;
+  --color-text-muted: #5b6573;
+  --color-text-on-primary: #f4f6f8;
+  --color-text-on-accent: #f4f6f8;
+  --color-surface: #ffffff;
+  --color-surface-raised: #ffffff;
+  --color-border: #d5dce3;
+
+  --color-danger: #b42318;
+  --color-success: #1b7a4a;
+  --color-warning: #b45309;
+}
+
+[data-density="comfortable"] {
+  --font-size-body: 16px;
+  --font-size-small: 14px;
+  --font-size-kicker: 12px;
+  --font-size-title: 24px;
+  --font-size-display: 32px;
+  --font-size-price: 20px;
+  --font-size-price-lg: 28px;
+  --row-height: 48px;
+}
+
+[data-density="compact"] {
+  --font-size-body: 14px;
+  --font-size-small: 12px;
+  --font-size-kicker: 11px;
+  --font-size-title: 20px;
+  --font-size-display: 24px;
+  --font-size-price: 16px;
+  --font-size-price-lg: 22px;
+  --row-height: 40px;
+}
+
+[data-density="comfortable"][data-theme="product"] {
+  --font-size-title: 22px;
+  --font-size-display: 28px;
+}

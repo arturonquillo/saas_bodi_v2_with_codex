@@ -1,0 +1,33 @@
+{
+  "name": "saas-frota",
+  "private": true,
+  "workspaces": [
+    "apps/web",
+    "packages/shared"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w @saas-frota/web",
+    "build": "npm run build -w @saas-frota/web",
+    "lint": "npm run lint -w @saas-frota/web",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate deploy && prisma generate",
+    "db:migrate:dev": "prisma migrate dev",
+    "db:seed": "prisma db seed",
+    "db:reset": "prisma migrate reset --force",
+    "test": "npm run test -w @saas-frota/web"
+  },
+  "prisma": {
+    "schema": "prisma/schema.prisma",
+    "seed": "tsx prisma/seed.ts"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "prisma": "^6.16.1",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.16.1",
+    "bcryptjs": "^2.4.3"
+  }
+}
